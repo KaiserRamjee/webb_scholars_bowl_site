@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Scholars Bowl Practice</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="topbar">
+    <h1>Scholars Bowl Practice</h1>
+    <nav class="tabs">
+      <button id="tab-study" class="tab" aria-pressed="true">Study</button>
+      <button id="tab-stats" class="tab" aria-pressed="false">Stats</button>
+    </nav>
+    <div class="account">
+      <span id="account-name"></span>
+      <button id="sign-in" hidden>Sign in with Google</button>
+      <button id="sign-out" hidden>Sign out</button>
+    </div>
+  </header>
+
+  <main>
+    <section id="view-study">
+      <div id="filters" class="filters">
+        <label class="field">Deck
+          <select id="deck">
+            <option value="all">All questions</option>
+            <option value="repeats">Asked more than once</option>
+            <option value="missed">Ones I've missed</option>
+          </select>
+        </label>
+        <label class="field">Type
+          <select id="type">
+            <option value="all">Toss-ups and bonuses</option>
+            <option value="T">Toss-ups</option>
+            <option value="B">Bonuses</option>
+          </select>
+        </label>
+        <details id="cat-menu" class="cat-menu">
+          <summary id="cat-summary">All categories</summary>
+          <div class="cat-panel">
+            <button id="cat-clear" type="button">All categories</button>
+            <div id="cat-list"></div>
+          </div>
+        </details>
+        <label class="check"><input type="checkbox" id="buzzer"> Buzzer mode</label>
+      </div>
+
+      <p id="deck-status" class="muted"></p>
+
+      <article id="card" class="card" hidden>
+        <p id="card-meta" class="card-meta"></p>
+        <p id="card-question" class="card-question"></p>
+        <div id="card-answer" class="card-answer" hidden>
+          <span class="label">Answer</span>
+          <p id="card-answer-text"></p>
+        </div>
+        <div class="actions">
+          <button id="reveal" class="primary">Show answer</button>
+          <button id="missed" class="miss" hidden>Missed it</button>
+          <button id="got" class="got" hidden>Got it</button>
+        </div>
+      </article>
+
+      <div id="empty" class="card" hidden>
+        <p id="empty-text"></p>
+        <button id="cram" class="primary">Keep practicing anyway</button>
+      </div>
+
+      <p id="session" class="muted"></p>
+      <p class="muted hint">Keys: Space buzzes or shows the answer, 1 = missed it, 2 = got it.</p>
+    </section>
+
+    <section id="view-stats" hidden>
+      <div id="tiles" class="tiles"></div>
+      <p class="muted">Mastered means you got it right again on a later review.</p>
+      <h2>By category</h2>
+      <table class="cat-table">
+        <thead>
+          <tr><th>Category</th><th>Seen</th><th class="num">Accuracy</th></tr>
+        </thead>
+        <tbody id="cat-rows"></tbody>
+      </table>
+    </section>
+  </main>
+
+  <footer class="muted"><span id="sync-status"></span></footer>
+
+  <script src="https://www.gstatic.com/firebasejs/12.19.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/12.19.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/12.19.0/firebase-firestore-compat.js"></script>
+  <script src="firebase-config.js"></script>
+  <script src="questions.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
