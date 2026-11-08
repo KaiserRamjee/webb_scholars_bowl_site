@@ -15,14 +15,26 @@ const REPORT_EMAIL = "kaiserramjee@gmail.com"; // where "Report a problem" email
 
 const $ = (id) => document.getElementById(id);
 
-const categoryCounts = new Map();
-for (const q of QUESTIONS) categoryCounts.set(q.c, (categoryCounts.get(q.c) || 0) + 1);
-const CATEGORIES = [...categoryCounts].sort((a, b) => b[1] - a[1]);
+const PLURAL_TYPE_NAMES = { T: "toss-ups", B: "bonuses" };
+
+// Toss-ups and bonuses are practiced separately. A question asked both ways is in both.
+function hasType(q, type) {
+  return q.t.includes(type);
+}
+
+// For each type: category -> how many questions of that type it has.
+const categoryCounts = { T: new Map(), B: new Map() };
+for (const q of QUESTIONS) {
+  for (const type of q.t) categoryCounts[type].set(q.c, (categoryCounts[type].get(q.c) || 0) + 1);
+}
+const categorySize = (name) => (categoryCounts.T.get(name) || 0) + (categoryCounts.B.get(name) || 0);
+const CATEGORIES = [...new Set(QUESTIONS.map((q) => q.c))].sort((a, b) => categorySize(b) - categorySize(a));
 
 let user = null;
 let progress = {}; // question id -> [box, day it is due, times right, times wrong]
-const settings = Object.assign({ deck: "all", type: "all", cats: [], buzzer: false }, readStore("sb.settings", {}));
-settings.cats = settings.cats.filter((name) => categoryCounts.has(name));
+const settings = Object.assign({ deck: "all", type: "T", cats: [], buzzer: false }, readStore("sb.settings", {}));
+if (!(settings.type in PLURAL_TYPE_NAMES)) settings.type = "T"; // older saves allowed "all"
+settings.cats = settings.cats.filter((name) => CATEGORIES.includes(name));
 
 let current = null;
 let stage = "thinking"; // "reading" -> "thinking" -> "answer"
@@ -70,7 +82,7 @@ function inDeck(q) {
   const p = progress[q.id];
   if (settings.deck === "repeats" && q.n < 2) return false;
   if (settings.deck === "missed" && !(p && p[3] > 0 && p[0] < MASTERED_BOX)) return false;
-  if (settings.type !== "all" && !q.t.includes(settings.type)) return false;
+  if (!hasType(q, settings.type)) return false;
   if (settings.cats.length && !settings.cats.includes(q.c)) return false;
   return true;
 }
@@ -124,7 +136,7 @@ function showCard() {
   $("card-answer-text").textContent = current.a;
   $("card-id").textContent = current.id;
   $("report").href = reportLink(current);
-  if (settings.buzzer) {
+  if (buzzerOn()) {
     startReading();
   } else {
     $("card-question").textContent = current.q;
@@ -163,6 +175,11 @@ function setStage(next) {
 }
 
 // Buzzer mode: the question appears one word at a time until you buzz.
+// Only toss-ups are buzzed on, so bonuses are always shown whole.
+function buzzerOn() {
+  return settings.buzzer && settings.type === "T";
+}
+
 function startReading() {
   const words = current.q.split(" ");
   let shown = 0;
@@ -225,18 +242,40 @@ function renderStatus() {
 
 function buildFilters() {
   $("deck").value = settings.deck;
-  $("type").value = settings.type;
   $("buzzer").checked = settings.buzzer;
-  for (const [name, count] of CATEGORIES) {
+  $("mode").querySelector(`input[value="${settings.type}"]`).checked = true;
+  for (const name of CATEGORIES) {
     const box = el("input");
     box.type = "checkbox";
     box.value = name;
     box.checked = settings.cats.includes(name);
     const label = el("label", "check");
-    label.append(box, name, el("span", "count", count));
+    label.append(box, name, el("span", "count"));
     $("cat-list").append(label);
   }
   renderCategorySummary();
+  renderForType();
+}
+
+// Category counts and the buzzer option depend on whether it's toss-ups or bonuses.
+function renderForType() {
+  const counts = categoryCounts[settings.type];
+  for (const box of $("cat-list").querySelectorAll("input")) {
+    const count = counts.get(box.value) || 0;
+    box.parentElement.querySelector(".count").textContent = count.toLocaleString();
+    box.parentElement.hidden = count === 0;
+  }
+  $("buzzer-option").hidden = settings.type !== "T";
+}
+
+function onModeChange() {
+  settings.type = $("mode").querySelector("input:checked").value;
+  writeStore("sb.settings", settings);
+  renderForType();
+  cramming = false;
+  recent.length = 0;
+  nextCard();
+  if (!$("view-stats").hidden) renderStats();
 }
 
 function renderCategorySummary() {
@@ -247,7 +286,6 @@ function renderCategorySummary() {
 
 function onFilterChange() {
   settings.deck = $("deck").value;
-  settings.type = $("type").value;
   settings.buzzer = $("buzzer").checked;
   settings.cats = [...$("cat-list").querySelectorAll("input:checked")].map((box) => box.value);
   writeStore("sb.settings", settings);
@@ -291,11 +329,14 @@ function categoryRow(name, c) {
   return row;
 }
 
+// Stats are for the type picked in the Toss-ups / Bonuses switch.
 function renderStats() {
   const day = today();
-  const byCategory = new Map(CATEGORIES.map(([name, total]) => [name, { total, seen: 0, right: 0, wrong: 0 }]));
+  const questions = QUESTIONS.filter((q) => hasType(q, settings.type));
+  const totals = [...categoryCounts[settings.type]].sort((a, b) => b[1] - a[1]);
+  const byCategory = new Map(totals.map(([name, total]) => [name, { total, seen: 0, right: 0, wrong: 0 }]));
   const all = { seen: 0, right: 0, wrong: 0, mastered: 0, due: 0 };
-  for (const q of QUESTIONS) {
+  for (const q of questions) {
     const p = progress[q.id];
     if (!p) continue;
     const c = byCategory.get(q.c);
@@ -309,7 +350,7 @@ function renderStats() {
     if (p[1] <= day) all.due += 1;
   }
   $("tiles").replaceChildren(
-    tile(all.seen.toLocaleString(), `of ${QUESTIONS.length.toLocaleString()} questions seen`),
+    tile(all.seen.toLocaleString(), `of ${questions.length.toLocaleString()} ${PLURAL_TYPE_NAMES[settings.type]} seen`),
     tile(percent(all.right, all.wrong), "accuracy"),
     tile(all.mastered.toLocaleString(), "mastered"),
     tile(all.due.toLocaleString(), "due for review"),
@@ -471,6 +512,7 @@ function bindEvents() {
   $("sign-out").addEventListener("click", signOut);
 
   $("filters").addEventListener("change", onFilterChange);
+  $("mode").addEventListener("change", onModeChange);
   $("cat-clear").addEventListener("click", () => {
     for (const box of $("cat-list").querySelectorAll("input:checked")) box.checked = false;
     onFilterChange();

@@ -21,6 +21,11 @@
   </header>
 
   <main>
+    <div id="mode" class="mode" role="radiogroup" aria-label="Question type">
+      <label><input type="radio" name="mode" value="T">Toss-ups</label>
+      <label><input type="radio" name="mode" value="B">Bonuses</label>
+    </div>
+
     <section id="view-study">
       <div id="filters" class="filters">
         <label class="field">Deck
@@ -30,13 +35,6 @@
             <option value="missed">Ones I've missed</option>
           </select>
         </label>
-        <label class="field">Type
-          <select id="type">
-            <option value="all">Toss-ups and bonuses</option>
-            <option value="T">Toss-ups</option>
-            <option value="B">Bonuses</option>
-          </select>
-        </label>
         <details id="cat-menu" class="cat-menu">
           <summary id="cat-summary">All categories</summary>
           <div class="cat-panel">
@@ -44,7 +42,7 @@
             <div id="cat-list"></div>
           </div>
         </details>
-        <label class="check"><input type="checkbox" id="buzzer"> Buzzer mode</label>
+        <label id="buzzer-option" class="check"><input type="checkbox" id="buzzer"> Buzzer mode</label>
       </div>
 
       <p id="deck-status" class="muted"></p>
