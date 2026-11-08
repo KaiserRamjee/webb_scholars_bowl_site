@@ -1,10 +1,13 @@
-"""Build questions.js for the website from the master sheet CSV.
+"""Build questions.js for the website from the master sheet CSVs.
 
-Run it from this folder whenever the sheet or corrections.csv changes:
+Run it from this folder whenever a sheet or corrections.csv changes:
 
     python build_questions.py
 
-Steps: read the sheet, merge rows that are the same question (even when
+Toss-ups come from TOSSUP_FILE and bonuses from BONUS_FILE (the old full
+sheet, which is also used to spot retyped copies; see known_copies).
+
+Steps: read the sheets, merge rows that are the same question (even when
 worded a little differently), then apply corrections.csv.
 
 Question wording is shown exactly as it is in the sheet. The show repeats
@@ -23,7 +26,8 @@ from collections import Counter, defaultdict
 from pathlib import Path
 
 HERE = Path(__file__).parent
-CSV_FILE = HERE / "Copy of The Master Sheet - THE MASTER SHEET unedited.csv"
+TOSSUP_FILE = HERE / "The Master Sheet - Randomized Toss-ups.csv"
+BONUS_FILE = HERE / "Copy of The Master Sheet - THE MASTER SHEET unedited.csv"
 FIXES_FILE = HERE / "corrections.csv"
 OUT_FILE = HERE / "questions.js"
 
@@ -118,35 +122,55 @@ def answer_words(answer):
     return frozenset(w[:-1] if len(w) > 3 and w.endswith("s") else w for w in words)
 
 
-def load_sheet():
-    """Every usable row of the sheet, in sheet order."""
+def make_row(kind, category, question, answer, game, season, block=1):
+    """One sheet row ready for matching, or None if the question or answer is blank."""
+    question, answer, category = clean(question), clean(answer), clean(category)
+    if not question or not answer:
+        return None
+    key = match_key(text_for_matching(question))
+    return {
+        "type": kind,
+        "category": CATEGORY_MAP.get(category, category),
+        "question": question,
+        "answer": answer,
+        "season": season.strip(),
+        "game": game.strip(),
+        "block": block,
+        "key": key,
+        "words": set(key.split()) - COMMON_WORDS,
+        "numbers": set(re.findall(r"\d+", key)),
+        "answer_words": answer_words(SCRAPE_NOTE.sub("", answer)),
+    }
+
+
+def load_old_sheet():
+    """Every usable row of the old full sheet (BONUS_FILE), in sheet order."""
     rows = []
     blocks = Counter()  # how many separate stretches of the sheet each game has had so far
     previous_game = None
-    with open(CSV_FILE, encoding="utf-8-sig", newline="") as f:
+    with open(BONUS_FILE, encoding="utf-8-sig", newline="") as f:
         for kind, category, question, answer, game, season in csv.reader(f):
-            game, season = game.strip(), season.strip()
-            if (season, game) != previous_game:
-                blocks[season, game] += 1
-                previous_game = (season, game)
-            question, answer, category = clean(question), clean(answer), clean(category)
-            if not question or not answer:
-                continue
-            key = match_key(text_for_matching(question))
-            rows.append({
-                "type": "T" if kind.strip() == "Toss-up" else "B",
-                "category": CATEGORY_MAP.get(category, category),
-                "question": question,
-                "answer": answer,
-                "season": season,
-                "game": game,
-                "block": blocks[season, game],
-                "key": key,
-                "words": set(key.split()) - COMMON_WORDS,
-                "numbers": set(re.findall(r"\d+", key)),
-                "answer_words": answer_words(SCRAPE_NOTE.sub("", answer)),
-            })
+            if (season.strip(), game.strip()) != previous_game:
+                previous_game = (season.strip(), game.strip())
+                blocks[previous_game] += 1
+            kind = "T" if kind.strip() == "Toss-up" else "B"
+            row = make_row(kind, category, question, answer, game, season, blocks[previous_game])
+            if row:
+                rows.append(row)
     return rows
+
+
+def load_tossups():
+    """Every usable row of the toss-up sheet. Its row order is shuffled and doesn't matter.
+
+    Columns: type, category, question, answer, round, season, random.
+    Every row in this file is a toss-up, whatever its first column says.
+    """
+    with open(TOSSUP_FILE, encoding="utf-8-sig", newline="") as f:
+        reader = csv.reader(f)
+        next(reader)  # header row
+        rows = [make_row("T", *line[1:6]) for line in reader if len(line) >= 6]
+    return [row for row in rows if row]
 
 
 def retyped(original, copy):
@@ -181,9 +205,48 @@ def drop_second_passes(rows):
     return kept
 
 
+def copy_id(row):
+    return (row["type"], row["key"], row["season"], row["game"])
+
+
+def known_copies(old_rows, kept_rows):
+    """How many times each (type, question, season, game) is a retyped copy.
+
+    Spotting a copy needs sheet order, which the shuffled toss-up sheet doesn't
+    have, so the copies are found in the old sheet and then removed from the
+    toss-up sheet too.
+    """
+    return Counter(map(copy_id, old_rows)) - Counter(map(copy_id, kept_rows))
+
+
+def without_copies(rows, copies):
+    copies = copies.copy()
+    kept = []
+    for row in rows:
+        if copies[copy_id(row)]:
+            copies[copy_id(row)] -= 1
+        else:
+            kept.append(row)
+    return kept
+
+
+def sort_key(row):
+    """Oldest season and game first, so "the first row" doesn't depend on row order."""
+    def number(text):
+        try:
+            return float(text)
+        except ValueError:
+            return float("inf")  # "No idea" goes last
+    return (number(row["season"]), number(row["game"]), row["type"], row["key"], row["question"], row["answer"])
+
+
 def read_rows():
-    """The rows the question bank is built from."""
-    return drop_second_passes(load_sheet())
+    """The rows the question bank is built from: toss-ups from the new sheet, bonuses from the old one."""
+    old_rows = load_old_sheet()
+    old_kept = drop_second_passes(old_rows)
+    bonuses = [row for row in old_kept if row["type"] == "B"]
+    tossups = without_copies(load_tossups(), known_copies(old_rows, old_kept))
+    return sorted(tossups + bonuses, key=sort_key)
 
 
 def times_asked(rows):
@@ -343,9 +406,9 @@ def main():
     )
     repeated = sum(q["n"] > 1 for q in questions)
     categories = len({q["c"] for q in questions})
-    copies = len(load_sheet()) - len(read_rows())
-    print(f"Left out {copies} rows that retype a question from earlier in the same game")
+    kinds = Counter(t for q in questions for t in q["t"])
     print(f"Wrote {len(questions)} questions in {categories} categories to {OUT_FILE.name}")
+    print(f"{kinds['T']} are toss-ups and {kinds['B']} are bonuses (a question can be both)")
     print(f"{repeated} of them were asked more than once")
 
 

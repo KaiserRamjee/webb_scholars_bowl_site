@@ -270,6 +270,21 @@ footer {
   color: var(--on-status);
 }
 
+.card-id {
+  margin: 16px 0 0;
+  color: var(--ink-muted);
+  font-size: 0.8rem;
+}
+
+.card-id code {
+  font-size: 0.85rem;
+  user-select: all; /* one click selects the whole id for copying */
+}
+
+.card-id a {
+  color: var(--accent);
+}
+
 @media (hover: none) {
   .hint {
     display: none;

@@ -11,6 +11,7 @@ const WORD_DELAY_MS = 300; // buzzer mode reading speed
 const SYNC_DELAY_MS = 8000;
 const TYPE_NAMES = { T: "Toss-up", B: "Bonus", TB: "Toss-up / Bonus" };
 const GUEST_KEY = "sb.progress.guest";
+const REPORT_EMAIL = "kaiserramjee@gmail.com"; // where "Report a problem" emails go
 
 const $ = (id) => document.getElementById(id);
 
@@ -121,12 +122,21 @@ function showCard() {
   }
   if (current.p) $("card-meta").append(el("span", "badge", "Had a picture on the show"));
   $("card-answer-text").textContent = current.a;
+  $("card-id").textContent = current.id;
+  $("report").href = reportLink(current);
   if (settings.buzzer) {
     startReading();
   } else {
     $("card-question").textContent = current.q;
     setStage("thinking");
   }
+}
+
+// Opens an email with the id and the question already filled in.
+function reportLink(q) {
+  const subject = `Question ${q.id} has a problem`;
+  const body = `Question ID: ${q.id}\nQuestion: ${q.q}\nAnswer: ${q.a}\n\nWhat's wrong:\n`;
+  return `mailto:${REPORT_EMAIL}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
 }
 
 function showEmpty() {
