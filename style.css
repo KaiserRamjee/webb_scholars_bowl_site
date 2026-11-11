@@ -11,6 +11,7 @@
   --good: #1b7a45;
   --bad: #b23a2e;
   --on-status: #ffffff;
+  --star: #a86500;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -26,6 +27,7 @@
     --good: #55c487;
     --bad: #f08477;
     --on-status: #10151a;
+    --star: #f2c14e;
   }
 }
 
@@ -243,10 +245,31 @@ footer {
   background: var(--surface);
 }
 
+.card-top {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
 .card-meta {
-  margin: 0 0 12px;
+  flex: 1;
+  margin: 0;
   color: var(--ink-muted);
   font-size: 0.85rem;
+}
+
+.star {
+  padding: 4px 10px;
+  color: var(--ink-muted);
+  font-size: 0.85rem;
+  white-space: nowrap;
+}
+
+.star[aria-pressed="true"] {
+  border-color: var(--star);
+  color: var(--star);
+  font-weight: 600;
 }
 
 .badge {

@@ -33,6 +33,7 @@
             <option value="all">All questions</option>
             <option value="repeats">Asked more than once</option>
             <option value="missed">Ones I've missed</option>
+            <option value="starred">Starred</option>
           </select>
         </label>
         <details id="cat-menu" class="cat-menu">
@@ -48,7 +49,10 @@
       <p id="deck-status" class="muted"></p>
 
       <article id="card" class="card" hidden>
-        <p id="card-meta" class="card-meta"></p>
+        <div class="card-top">
+          <p id="card-meta" class="card-meta"></p>
+          <button id="star" class="star" type="button" aria-pressed="false" title="Save to your Starred deck (S)">☆ Star</button>
+        </div>
         <p id="card-question" class="card-question"></p>
         <div id="card-answer" class="card-answer" hidden>
           <span class="label">Answer</span>
@@ -68,7 +72,7 @@
       </div>
 
       <p id="session" class="muted"></p>
-      <p class="muted hint">Keys: Space buzzes or shows the answer, 1 = missed it, 2 = got it.</p>
+      <p class="muted hint">Keys: Space buzzes or shows the answer, 1 = missed it, 2 = got it, S = star.</p>
     </section>
 
     <section id="view-stats" hidden>

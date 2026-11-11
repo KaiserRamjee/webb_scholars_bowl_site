@@ -6,11 +6,13 @@
 const INTERVALS = [0, 3, 7, 21, 60, 120];
 const FIRST_TRY_BOX = 2; // a new card you already know skips the short intervals
 const MASTERED_BOX = 3;
-const RECENT_GAP = 8; // a card can't come back until this many others have been shown
+const RECENT_GAP = 8; // no card repeats until this many others have been shown
+const MISSED_GAP = 50; // a missed card waits until this many more questions have been answered
 const WORD_DELAY_MS = 300; // buzzer mode reading speed
 const SYNC_DELAY_MS = 8000;
 const TYPE_NAMES = { T: "Toss-up", B: "Bonus", TB: "Toss-up / Bonus" };
 const GUEST_KEY = "sb.progress.guest";
+const GUEST_STARS_KEY = "sb.stars.guest";
 const REPORT_EMAIL = "kaiserramjee@gmail.com"; // where "Report a problem" emails go
 
 const $ = (id) => document.getElementById(id);
@@ -31,7 +33,11 @@ const categorySize = (name) => (categoryCounts.T.get(name) || 0) + (categoryCoun
 const CATEGORIES = [...new Set(QUESTIONS.map((q) => q.c))].sort((a, b) => categorySize(b) - categorySize(a));
 
 let user = null;
-let progress = {}; // question id -> [box, day it is due, times right, times wrong]
+// question id -> [box, day it is due, times right, times wrong, answer count when last missed]
+let progress = {};
+let answered = 0; // total answers recorded in progress; missed cards wait on this
+// question id -> [1 starred or 0 unstarred, time it changed]. Unstars are kept so syncing can't bring a star back.
+let stars = {};
 const settings = Object.assign({ deck: "all", type: "T", cats: [], buzzer: false }, readStore("sb.settings", {}));
 if (!(settings.type in PLURAL_TYPE_NAMES)) settings.type = "T"; // older saves allowed "all"
 settings.cats = settings.cats.filter((name) => CATEGORIES.includes(name));
@@ -65,10 +71,60 @@ function progressKey() {
   return user ? "sb.progress." + user.uid : GUEST_KEY;
 }
 
+function starsKey() {
+  return user ? "sb.stars." + user.uid : GUEST_STARS_KEY;
+}
+
+function loadLocal() {
+  progress = readStore(progressKey(), {});
+  stars = readStore(starsKey(), {});
+  countAnswered();
+}
+
+function countAnswered() {
+  answered = 0;
+  for (const id in progress) answered += attempts(progress[id]);
+}
+
 function saveProgress() {
   changes += 1;
   writeStore(progressKey(), progress);
   scheduleSync();
+}
+
+function saveStars() {
+  changes += 1;
+  writeStore(starsKey(), stars);
+  scheduleSync();
+}
+
+// ---------- Stars ----------
+
+function isStarred(id) {
+  return Boolean(stars[id]) && stars[id][0] === 1;
+}
+
+function toggleStar() {
+  if (!current) return;
+  stars[current.id] = [isStarred(current.id) ? 0 : 1, Date.now()];
+  saveStars();
+  renderStar();
+  renderStatus();
+}
+
+function renderStar() {
+  const on = Boolean(current) && isStarred(current.id);
+  $("star").setAttribute("aria-pressed", on);
+  $("star").textContent = on ? "★ Starred" : "☆ Star";
+}
+
+// For each question keep whichever side changed its star most recently.
+function mergeStars(base, other) {
+  const merged = { ...base };
+  for (const id in other) {
+    if (!merged[id] || other[id][1] > merged[id][1]) merged[id] = other[id];
+  }
+  return merged;
 }
 
 // ---------- Picking the next card ----------
@@ -82,6 +138,7 @@ function inDeck(q) {
   const p = progress[q.id];
   if (settings.deck === "repeats" && q.n < 2) return false;
   if (settings.deck === "missed" && !(p && p[3] > 0 && p[0] < MASTERED_BOX)) return false;
+  if (settings.deck === "starred" && !isStarred(q.id)) return false;
   if (!hasType(q, settings.type)) return false;
   if (settings.cats.length && !settings.cats.includes(q.c)) return false;
   return true;
@@ -95,12 +152,25 @@ function pickRandom(list) {
   return list[Math.floor(Math.random() * list.length)];
 }
 
+// A missed card sits out until enough other questions have been answered, so getting it
+// right next time isn't just remembering it from a minute ago. Small decks wait less.
+function missedGap(deck) {
+  return Math.max(0, Math.min(MISSED_GAP, deck.length - 1));
+}
+
+function isWaiting(q, gap) {
+  const p = progress[q.id];
+  return Boolean(p) && p[0] === 0 && p[4] !== undefined && answered < p[4] + gap;
+}
+
 // Reviews that are due come first (missed ones before the rest), then new questions.
+// The Starred deck never runs out: once nothing is due it keeps going through the stars.
 function pickNext() {
   const deck = QUESTIONS.filter(inDeck);
   const gap = Math.min(RECENT_GAP, deck.length - 1);
   const blocked = gap > 0 ? recent.slice(-gap) : [];
-  const open = deck.filter((q) => !blocked.includes(q.id));
+  const waitGap = missedGap(deck);
+  const open = deck.filter((q) => !blocked.includes(q.id) && !isWaiting(q, waitGap));
   const day = today();
 
   const due = open.filter((q) => isDue(q, day));
@@ -110,7 +180,7 @@ function pickNext() {
   }
   const fresh = open.filter((q) => !progress[q.id]);
   if (fresh.length) return pickRandom(fresh);
-  return cramming ? pickRandom(open) : undefined;
+  return cramming || settings.deck === "starred" ? pickRandom(open) : undefined;
 }
 
 function nextCard() {
@@ -136,6 +206,7 @@ function showCard() {
   $("card-answer-text").textContent = current.a;
   $("card-id").textContent = current.id;
   $("report").href = reportLink(current);
+  renderStar();
   if (buzzerOn()) {
     startReading();
   } else {
@@ -152,14 +223,23 @@ function reportLink(q) {
 }
 
 function showEmpty() {
-  const size = QUESTIONS.filter(inDeck).length;
+  const deck = QUESTIONS.filter(inDeck);
+  const size = deck.length;
+  const gap = missedGap(deck);
+  const waiting = deck.filter((q) => isWaiting(q, gap)).length;
   $("card").hidden = true;
   $("empty").hidden = false;
   $("cram").hidden = size === 0;
-  if (size) {
+  if (waiting) {
+    $("empty-text").textContent =
+      `You're caught up for now. ${waiting.toLocaleString()} missed question${waiting === 1 ? "" : "s"} ` +
+      `will come back after you answer some others.`;
+  } else if (size) {
     $("empty-text").textContent = "You're caught up on this deck. Its questions come back for review later.";
   } else if (settings.deck === "missed") {
     $("empty-text").textContent = "Nothing here yet. Questions you miss show up in this deck.";
+  } else if (settings.deck === "starred") {
+    $("empty-text").textContent = "No starred questions yet. Press Star on a question (or the S key) to save it here.";
   } else {
     $("empty-text").textContent = "No questions match these filters.";
   }
@@ -218,7 +298,10 @@ function grade(correct) {
   if (correct) box = old ? Math.min(old[0] + 1, INTERVALS.length - 1) : FIRST_TRY_BOX;
   const right = (old ? old[2] : 0) + (correct ? 1 : 0);
   const wrong = (old ? old[3] : 0) + (correct ? 0 : 1);
-  progress[current.id] = [box, today() + INTERVALS[box], right, wrong];
+  answered += 1;
+  const entry = [box, today() + INTERVALS[box], right, wrong];
+  if (!correct) entry.push(answered);
+  progress[current.id] = entry;
 
   session[correct ? "right" : "wrong"] += 1;
   recent.push(current.id);
@@ -412,10 +495,11 @@ function onAuthChanged(newUser) {
   $("account-name").textContent = user ? user.displayName || user.email : "";
 
   const firstTimeOnThisDevice = user && readStore(progressKey(), null) === null;
-  progress = readStore(progressKey(), {});
+  loadLocal();
   if (firstTimeOnThisDevice) {
     adoptGuestProgress();
     writeStore(progressKey(), progress);
+    writeStore(starsKey(), stars);
   }
   if (user) syncNow();
   else setSyncStatus("Sign in to keep your progress on every device.");
@@ -427,11 +511,19 @@ function onAuthChanged(newUser) {
 // Answers given on this device before signing in can be moved into the account.
 function adoptGuestProgress() {
   const guest = readStore(GUEST_KEY, {});
+  const guestStars = readStore(GUEST_STARS_KEY, {});
   const count = Object.keys(guest).length;
-  if (!count) return;
-  if (!confirm(`Add the ${count} questions answered on this device before signing in to your account?`)) return;
+  const starCount = Object.values(guestStars).filter((s) => s[0] === 1).length;
+  if (!count && !starCount) return;
+  const parts = [];
+  if (count) parts.push(`the ${count} questions answered`);
+  if (starCount) parts.push(`the ${starCount} questions starred`);
+  if (!confirm(`Add ${parts.join(" and ")} on this device before signing in to your account?`)) return;
   progress = mergeProgress(progress, guest);
+  stars = mergeStars(stars, guestStars);
+  countAnswered();
   localStorage.removeItem(GUEST_KEY);
+  localStorage.removeItem(GUEST_STARS_KEY);
 }
 
 function scheduleSync() {
@@ -449,23 +541,35 @@ async function syncNow() {
   setSyncStatus("Saving…");
   try {
     const ref = db.collection("users").doc(uid);
-    const merged = await db.runTransaction(async (tx) => {
+    const [merged, mergedStars] = await db.runTransaction(async (tx) => {
       const snap = await tx.get(ref);
       if (!user || user.uid !== uid) throw new Error("signed out during sync");
-      // Stored as one JSON string: a map with a field per question would
+      // Stored as JSON strings: a map with a field per question would
       // pass Firestore's limit of 40,000 index entries per document.
-      const cloudText = (snap.exists && snap.data().progress) || "{}";
+      const data = snap.exists ? snap.data() : {};
+      const cloudText = data.progress || "{}";
+      const cloudStarsText = data.stars || "{}";
       const result = mergeProgress(JSON.parse(cloudText), progress);
+      const starsResult = mergeStars(JSON.parse(cloudStarsText), stars);
       const resultText = JSON.stringify(result);
-      if (resultText !== cloudText) {
-        tx.set(ref, { progress: resultText, updated: firebase.firestore.FieldValue.serverTimestamp() });
+      const starsText = JSON.stringify(starsResult);
+      if (resultText !== cloudText || starsText !== cloudStarsText) {
+        tx.set(ref, {
+          progress: resultText,
+          stars: starsText,
+          updated: firebase.firestore.FieldValue.serverTimestamp(),
+        });
       }
-      return result;
+      return [result, starsResult];
     });
     if (user && user.uid === uid) {
       progress = mergeProgress(merged, progress);
+      stars = mergeStars(mergedStars, stars);
+      countAnswered();
       writeStore(progressKey(), progress);
+      writeStore(starsKey(), stars);
       setSyncStatus("Progress saved to your account.");
+      if (current) renderStar();
       renderStatus();
       if (!$("view-stats").hidden) renderStats();
     }
@@ -504,6 +608,7 @@ function bindEvents() {
   $("reveal").addEventListener("click", primaryAction);
   $("missed").addEventListener("click", () => grade(false));
   $("got").addEventListener("click", () => grade(true));
+  $("star").addEventListener("click", toggleStar);
   $("cram").addEventListener("click", () => {
     cramming = true;
     nextCard();
@@ -538,6 +643,8 @@ function bindEvents() {
       grade(false);
     } else if (e.key === "2" || e.key === "ArrowRight") {
       grade(true);
+    } else if (e.key === "s" || e.key === "S") {
+      toggleStar();
     }
   });
 
@@ -550,6 +657,6 @@ function bindEvents() {
 buildFilters();
 bindEvents();
 if (!startAccounts()) {
-  progress = readStore(GUEST_KEY, {});
+  loadLocal();
   nextCard();
 }
