@@ -268,10 +268,8 @@ function startReading() {
   readTimer = setInterval(() => {
     shown += 1;
     $("card-question").textContent = words.slice(0, shown).join(" ");
-    if (shown >= words.length) {
-      stopReading();
-      setStage("thinking");
-    }
+    // When the whole question is read you still have to buzz, like in a match.
+    if (shown >= words.length) stopReading();
   }, WORD_DELAY_MS);
 }
 
